@@ -38,7 +38,7 @@ def self_ping_loop():
 # ---------------------------------------------------------
 # 2. BOT INITIALIZATION & DATABASE SETUP
 # ---------------------------------------------------------
-TOKEN = os.getenv("BOT_TOKEN", "8776609545:AAFaNsGk4kAsiOWPksVEDordtoYtt1Vv7sY")
+TOKEN = os.getenv("BOT_TOKEN", "8776609545:AAGPX_9vj_iEqwzOOZDsQT8iGqkm78ilZwE")
 bot = telebot.TeleBot(TOKEN)
 
 conn = sqlite3.connect('bot_database.db', check_same_thread=False)
