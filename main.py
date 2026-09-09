@@ -347,7 +347,7 @@ def deduct_balance_cmd(message):
         bot.reply_to(message, "❌ Invalid inputs!")
 
 # ---------------------------------------------------------
-# 5. EXACT SCREENSHOT UI QR CLAIM & PROOF WORKFLOW
+# 5. FIXED APPROVAL REQUEST WORKFLOW (EXACT SCREENSHOT UI)
 # ---------------------------------------------------------
 @bot.callback_query_handler(func=lambda call: call.data.startswith("claim_qr_"))
 def claim_qr_handler(call):
@@ -371,6 +371,7 @@ def claim_qr_handler(call):
         bot.answer_callback_query(call.id, "⚠️ This QR has already been claimed or expired!", show_alert=True)
         return
 
+    # LOCK USER STATE FOR PROOF SUBMISSION
     user_states[uid] = f"WAITING_PROOF_{task_id}"
     bot.answer_callback_query(call.id, "✅ QR Unlocked!")
 
@@ -381,13 +382,14 @@ def claim_qr_handler(call):
     )
     bot.send_photo(call.message.chat.id, qr_file_id, caption=caption, parse_mode="Markdown")
 
-# Admin Uploading QR / User Submitting Payment Proof
+# Admin Uploading QR OR User Submitting Payment Proof
 @bot.message_handler(content_types=['photo'])
 def handle_photos(message):
     uid = message.from_user.id
-    state = user_states.get(uid, "")
+    register_user(uid, message.from_user.username)
+    state = str(user_states.get(uid, ""))
 
-    # Admin Uploading QR Code (Broadcasts EXACT SCREENSHOT UI)
+    # 1. Admin Uploading QR Code (Broadcasts EXACT SCREENSHOT UI)
     if is_admin(uid) and state == "WAITING_QR_PHOTO":
         file_id = message.photo[-1].file_id
         cursor.execute("INSERT INTO qr_tasks (qr_file_id, price, status) VALUES (?, ?, 'AVAILABLE')", (file_id, 8.0))
@@ -395,9 +397,8 @@ def handle_photos(message):
         task_id = cursor.lastrowid
         user_states[uid] = None
         
-        bot.reply_to(message, f"✅ **New QR Task #{task_id} saved! Broadcasting to users...**", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ **New QR Task #{task_id} saved! Broadcasting...**", parse_mode="Markdown")
         
-        # EXACT SCREENSHOT UI MATCH
         markup = types.InlineKeyboardMarkup()
         btn = types.InlineKeyboardButton("💳 Make Payment", callback_data=f"claim_qr_{task_id}")
         markup.add(btn)
@@ -413,7 +414,6 @@ def handle_photos(message):
         s = 0
         for u in users:
             try:
-                # Sent as message with inline button (Exactly like screenshot)
                 bot.send_message(u[0], text_broadcast, reply_markup=markup, parse_mode="Markdown")
                 s += 1
             except:
@@ -421,7 +421,7 @@ def handle_photos(message):
         bot.send_message(message.chat.id, f"🚀 **Broadcasted to `{s}` users!**", parse_mode="Markdown")
         return
 
-    # Admin Broadcast Photo
+    # 2. Admin Broadcast Photo
     if is_admin(uid) and state == "WAITING_BROADCAST_PHOTO":
         user_states[uid] = None
         photo_id = message.photo[-1].file_id
@@ -439,9 +439,15 @@ def handle_photos(message):
         bot.reply_to(message, f"🖼️ **Photo Broadcast Sent!**\n✅ Success: `{s}` | ❌ Failed: `{f}`", parse_mode="Markdown")
         return
 
-    # User Submitting Payment Screenshot Proof
-    if state and state.startswith("WAITING_PROOF_"):
-        task_id = int(state.replace("WAITING_PROOF_", ""))
+    # 3. User Submitting Payment Screenshot Proof (100% FIXED REQUEST TO ADMIN)
+    if state.startswith("WAITING_PROOF_") or not is_admin(uid):
+        task_id = 0
+        if state.startswith("WAITING_PROOF_"):
+            try:
+                task_id = int(state.replace("WAITING_PROOF_", ""))
+            except:
+                task_id = 0
+        
         proof_file_id = message.photo[-1].file_id
 
         cursor.execute("INSERT INTO submissions (task_id, user_id, proof_file_id, status) VALUES (?, ?, ?, 'PENDING')",
@@ -458,7 +464,7 @@ def handle_photos(message):
             parse_mode="Markdown"
         )
 
-        # Send Approval Request to All Admins
+        # SEND APPROVAL REQUEST WITH BUTTONS TO ALL ADMINS
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
             types.InlineKeyboardButton("✅ Approve (₹8)", callback_data=f"appr_{sub_id}"),
@@ -480,9 +486,9 @@ def handle_photos(message):
             try:
                 bot.send_photo(admin_id, proof_file_id, caption=admin_text, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
-                logging.error(f"Error notifying admin {admin_id}: {e}")
+                logging.error(f"Error sending approval to admin {admin_id}: {e}")
 
-# Admin Approval / Rejection Handler
+# Admin Approval / Rejection Action Handler
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("appr_", "rejc_")))
 def handle_approval_action(call):
     if not is_admin(call.from_user.id): return
@@ -509,7 +515,7 @@ def handle_approval_action(call):
         conn.commit()
 
         bot.answer_callback_query(call.id, "✅ Approved successfully!")
-        bot.edit_message_caption("✅ **APPROVED BY ADMIN (+₹8.00)**", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        bot.edit_message_caption(call.message.caption + "\n\n✅ **APPROVED BY ADMIN (+₹8.00)**", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
         try:
             bot.send_message(
@@ -527,7 +533,7 @@ def handle_approval_action(call):
         conn.commit()
 
         bot.answer_callback_query(call.id, "❌ Rejected!")
-        bot.edit_message_caption("❌ **REJECTED BY ADMIN**", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        bot.edit_message_caption(call.message.caption + "\n\n❌ **REJECTED BY ADMIN**", chat_id=call.message.chat.id, message_id=call.message.message_id)
 
         try:
             bot.send_message(
@@ -540,7 +546,7 @@ def handle_approval_action(call):
             pass
 
 # ---------------------------------------------------------
-# 6. TEXT BUTTON HANDLERS & BROADCAST TEXT STATE
+# 6. TEXT BUTTON HANDLERS
 # ---------------------------------------------------------
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
@@ -548,7 +554,7 @@ def handle_text(message):
     if is_banned(uid): return
     register_user(uid, message.from_user.username)
     text = message.text.strip()
-    state = user_states.get(uid, "")
+    state = str(user_states.get(uid, ""))
 
     # Handle Pending Broadcast Text Input
     if is_admin(uid) and state == "WAITING_BROADCAST_TEXT":
@@ -610,7 +616,7 @@ def handle_text(message):
         bot.send_message(message.chat.id, "If you need help, contact our support team:", reply_markup=markup, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 7. MAIN EXECUTION (WITH 24/7 AUTO-RESTART LOOP)
+# 7. MAIN EXECUTION
 # ---------------------------------------------------------
 if __name__ == "__main__":
     server_thread = threading.Thread(target=run_flask)
